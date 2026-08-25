@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Serializers & Validations — DRF</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reset.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
+<link rel="stylesheet" href="theme-ipssi.css">
+</head>
+<body>
+<button id="theme-toggle" title="Changer de thème">🌓</button>
+<div class="reveal">
+<div class="slides">
+
+<!-- ============ TITRE ============ -->
+<section class="title-slide">
+  <div class="kicker">Bloc 1 — Django REST Framework</div>
+  <h1>Serializers &amp; Validations</h1>
+  <p class="subtitle">Du champ isolé à la ressource complète</p>
+  <div class="modules-badge">
+    <span class="badge">Validation</span>
+    <span class="badge">Cycle de vie</span>
+    <span class="badge">Relations</span>
+  </div>
+</section>
+
+<section>
+  <h2>Objectifs</h2>
+  <ul class="objectives">
+    <li>Distinguer validation <strong>champ</strong> vs validation <strong>objet</strong></li>
+    <li>Utiliser les mécanismes <strong>déclaratifs</strong> (validators)</li>
+    <li>Maîtriser le cycle <code>save()</code> / <code>create()</code> / <code>update()</code></li>
+    <li>Contrôler précisément ce qui entre et ce qui sort</li>
+    <li>Gérer les relations : imbriquées, listes, hyperliens</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Fil rouge</h2>
+  <div class="card">
+    <h4>Une seule API, du plus simple au plus complexe</h4>
+    Inscription (<code>SignupSerializer</code>) → Commandes (<code>Order</code> / <code>OrderItem</code>)
+    → Réservations de salle (<code>Booking</code>) → Profils (<code>UserSerializer</code>)
+  </div>
+</section>
+
+<!-- ============ PARTIE 1 ============ -->
+<section class="section-slide">
+  <div class="part-number">1</div>
+  <h1>Validation de champ &amp; d'objet</h1>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Un email institutionnel obligatoire</h2>
+    <p>L'inscription doit être <strong>rejetée</strong> si l'email ne se termine pas par
+    <code>@ipssi.fr</code> — avant tout enregistrement en base.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>validate_&lt;champ&gt;</code></h2>
+    <ul>
+      <li>Appelée <strong>automatiquement</strong> par <code>is_valid()</code> (convention de nom)</li>
+      <li>Doit <strong>retourner</strong> la valeur (jamais un booléen)</li>
+      <li>Erreur → <code>raise serializers.ValidationError(...)</code></li>
+    </ul>
+  </section>
+  <section>
+    <div class="kicker">Code</div>
+    <pre><code class="language-python" data-trim data-noescape>def validate_email(self, value):
+    if not value.endswith("@ipssi.fr"):
+        raise serializers.ValidationError("Email IPSSI requis.")
+    return value</code></pre>
+  </section>
+  <section>
+    <div class="kicker">❌ Erreur courante</div>
+    <pre><code class="language-python" data-trim data-noescape>def validate_email(self, value):
+    if not value.endswith("@ipssi.fr"):
+        return False   # jamais lu par is_valid()</code></pre>
+    <p><span class="hl-danger">Aucune erreur ne sera levée</span> — <code>False</code> devient la valeur du champ.</p>
+  </section>
+  <section>
+    <div class="kicker">✅ Correction</div>
+    <pre><code class="language-python" data-trim data-noescape>def validate_email(self, value):
+    if not value.endswith("@ipssi.fr"):
+        raise serializers.ValidationError("Email IPSSI requis.")
+    return value   # toujours la valeur, jamais un bool</code></pre>
+  </section>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Confirmation de mot de passe</h2>
+    <p><code>password</code> et <code>password_confirm</code> doivent correspondre —
+    impossible à vérifier champ par champ.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>validate(self, attrs)</code></h2>
+    <ul>
+      <li>Validation <strong>objet-level</strong>, reçoit tous les champs déjà validés</li>
+      <li>Doit retourner <code>attrs</code> en entier</li>
+      <li>Erreur ciblée : <code>ValidationError({"champ": "..."})</code></li>
+    </ul>
+  </section>
+  <section>
+    <div class="kicker">Code</div>
+    <pre><code class="language-python" data-trim data-noescape>def validate(self, attrs):
+    if attrs["password"] != attrs["password_confirm"]:
+        raise serializers.ValidationError(
+            {"password_confirm": "Les mots de passe ne correspondent pas."}
+        )
+    return attrs</code></pre>
+  </section>
+  <section>
+    <div class="kicker">❌ Erreur courante</div>
+    <pre><code class="language-python" data-trim data-noescape>def validate(self, attrs):
+    if attrs["password"] != attrs["password_confirm"]:
+        raise serializers.ValidationError("Erreur")
+    # pas de return !</code></pre>
+    <p>DRF lève un <span class="hl-danger">AssertionError</span> :
+    <code>.validate() should return the validated data</code></p>
+  </section>
+  <section>
+    <div class="kicker">✅ Correction</div>
+    <pre><code class="language-python" data-trim data-noescape>def validate(self, attrs):
+    if attrs["password"] != attrs["password_confirm"]:
+        raise serializers.ValidationError({"password_confirm": "..."})
+    return attrs   # toujours renvoyer le dict complet</code></pre>
+  </section>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Quel code renvoyer ?</h2>
+    <p><code>is_valid()</code> échoue — quel status HTTP la vue doit-elle renvoyer ?</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2>Sémantique des codes HTTP</h2>
+    <div class="cols cols-2">
+      <div class="card ok"><h4>400</h4>Données invalides</div>
+      <div class="card"><h4>401</h4>Non authentifié</div>
+      <div class="card"><h4>403</h4>Pas les droits</div>
+      <div class="card danger"><h4>500</h4>Bug serveur</div>
+    </div>
+  </section>
+</section>
+
+<!-- ============ PARTIE 2 ============ -->
+<section class="section-slide">
+  <div class="part-number">2</div>
+  <h1>Mécanismes déclaratifs</h1>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Empêcher les doublons d'email</h2>
+    <p>Deux comptes ne doivent jamais partager le même email.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>validators=[...]</code></h2>
+    <ul>
+      <li>Mécanisme <strong>indépendant</strong> de <code>validate_&lt;champ&gt;</code></li>
+      <li>Orchestré par <code>is_valid()</code>, jamais imbriqué dedans</li>
+      <li><code>ModelSerializer</code> l'ajoute automatiquement si <code>unique=True</code></li>
+    </ul>
+  </section>
+  <section>
+    <div class="kicker">❌ Erreur courante</div>
+    <pre><code class="language-python" data-trim data-noescape>def validate_email(self, value):
+    if User.objects.filter(email=value).exists():   # double travail
+        raise serializers.ValidationError("Email déjà utilisé.")
+    return value</code></pre>
+  </section>
+  <section>
+    <div class="kicker">✅ Correction</div>
+    <pre><code class="language-python" data-trim data-noescape>email = serializers.EmailField(
+    validators=[UniqueValidator(queryset=User.objects.all())]
+)</code></pre>
+  </section>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Une salle, un seul créneau</h2>
+    <p>Empêcher deux réservations sur la <strong>même salle</strong> à la <strong>même date</strong>
+    — une contrainte sur deux champs combinés.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>Meta.validators</code> + <code>UniqueTogetherValidator</code></h2>
+    <p>Équivalent objet-level et déclaratif — indépendant de <code>validate()</code>.</p>
+  </section>
+  <section>
+    <div class="kicker">❌ Erreur courante</div>
+    <pre><code class="language-python" data-trim data-noescape>class Meta:
+    validators = [UniqueTogetherValidator(
+        queryset=Booking.objects.filter(room=room),
+        queryset=Booking.objects.filter(date=date),   # deux querysets !
+    )]</code></pre>
+  </section>
+  <section>
+    <div class="kicker">✅ Correction</div>
+    <pre><code class="language-python" data-trim data-noescape>class Meta:
+    validators = [UniqueTogetherValidator(
+        queryset=Booking.objects.all(),
+        fields=["room", "date"],
+    )]</code></pre>
+  </section>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Réutiliser une règle sur 3 serializers</h2>
+    <p>La règle « email <code>@ipssi.fr</code> » doit servir ailleurs sans copier-coller.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2>Validator custom (classe)</h2>
+    <ul>
+      <li>État configurable à la <strong>construction</strong> (attribut d'instance)</li>
+      <li>DRF appelle <code>validator(value)</code> : un seul argument</li>
+      <li>⚠️ Ne pas nommer sa classe <code>EmailValidator</code> (collision Django)</li>
+    </ul>
+  </section>
+  <section>
+    <div class="kicker">Code</div>
+    <pre><code class="language-python" data-trim data-noescape>class CompanyEmailValidator:
+    def __init__(self, domain):
+        self.domain = domain
+
+    def __call__(self, value):
+        if not value.endswith(self.domain):
+            raise serializers.ValidationError(f"Domaine {self.domain} requis.")</code></pre>
+  </section>
+</section>
+
+<!-- ============ PARTIE 3 ============ -->
+<section class="section-slide">
+  <div class="part-number">3</div>
+  <h1>Cycle de vie de l'objet</h1>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Ne pas redéclarer 10 champs</h2>
+    <p>Le modèle <code>User</code> connaît déjà les types et contraintes.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>ModelSerializer</code></h2>
+    <ul>
+      <li>Introspection automatique (type, <code>max_length</code>, <code>unique</code>…)</li>
+      <li><code>extra_kwargs</code> : ajuster sans redéclarer le champ</li>
+    </ul>
+  </section>
+  <section>
+    <div class="kicker">Code</div>
+    <pre><code class="language-python" data-trim data-noescape>class SignupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["email", "password"]
+        extra_kwargs = {
+            "password": {"write_only": True, "min_length": 8},
+        }</code></pre>
+  </section>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Le mot de passe stocké en clair</h2>
+    <p>Après inscription, le mot de passe apparaît <strong>lisible</strong> en base de données.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>save()</code> vs <code>create()</code></h2>
+    <ul>
+      <li><code>save()</code> = dispatcher générique — <strong>ne jamais l'override</strong></li>
+      <li>Il délègue à <code>create()</code> / <code>update()</code></li>
+      <li><code>create_user()</code> hash le mot de passe, <code>Model.objects.create()</code> non</li>
+    </ul>
+  </section>
+  <section>
+    <div class="kicker">❌ Erreur courante</div>
+    <pre><code class="language-python" data-trim data-noescape>def save(self, **kwargs):               # override du dispatcher
+    data = self.validated_data
+    data.pop("password_confirm")
+    return User.objects.create(**data)  # mot de passe en clair</code></pre>
+  </section>
+  <section>
+    <div class="kicker">✅ Correction</div>
+    <pre><code class="language-python" data-trim data-noescape>def create(self, validated_data):
+    validated_data.pop("password_confirm")
+    return User.objects.create_user(**validated_data)  # hash auto</code></pre>
+  </section>
+</section>
+
+<!-- ============ PARTIE 4 ============ -->
+<section class="section-slide">
+  <div class="part-number">4</div>
+  <h1>Champs avancés</h1>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Accepter en entrée, jamais en sortie</h2>
+    <p>Le mot de passe doit être reçu à l'inscription mais <strong>jamais renvoyé</strong> par l'API.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>write_only</code> / <code>read_only</code></h2>
+    <p>Asymétrie lecture/écriture — totalement indépendante du hashing (<code>create_user</code>).</p>
+  </section>
+  <section>
+    <div class="kicker">❌ Idée fausse</div>
+    <div class="card danger">Un <code>PasswordField</code> magique, ou un flag <code>hidden=True</code>…
+    <br><strong>ça n'existe pas.</strong></div>
+  </section>
+  <section>
+    <div class="kicker">✅ Correction</div>
+    <pre><code class="language-python" data-trim data-noescape>password = serializers.CharField(write_only=True)</code></pre>
+  </section>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Exposer un champ d'une relation</h2>
+    <p>Afficher <code>room.name</code> sous la clé <code>room_name</code>, sans renommer le modèle.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>source</code></h2>
+    <p>Remappe le nom exposé vers l'attribut réel — chemin à points possible.</p>
+  </section>
+  <section>
+    <div class="kicker">Code</div>
+    <pre><code class="language-python" data-trim data-noescape>room_name = serializers.CharField(source="room.name", read_only=True)</code></pre>
+  </section>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Un message d'erreur clair pour l'étudiant</h2>
+    <p>Le message générique DRF n'est pas assez explicite.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>error_messages</code> via <code>extra_kwargs</code></h2>
+  </section>
+  <section>
+    <div class="kicker">Code</div>
+    <pre><code class="language-python" data-trim data-noescape>extra_kwargs = {
+    "email": {"error_messages": {"required": "L'email est obligatoire."}},
+}</code></pre>
+  </section>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Modifier un seul champ (PATCH)</h2>
+    <p>Un PATCH ne doit pas redemander tous les champs obligatoires.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>partial=True</code></h2>
+    <ul>
+      <li>Désactive <strong>uniquement</strong> le check « required » sur les champs absents</li>
+      <li>Un champ présent est toujours validé normalement</li>
+      <li>Auto-utilisé par <code>partial_update()</code> (PATCH)</li>
+    </ul>
+  </section>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Un champ qui n'existe pas dans le modèle</h2>
+    <p>Afficher <code>jours_restants</code>, calculé à la volée.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>SerializerMethodField</code></h2>
+    <p>Champ en lecture seule + méthode <code>get_&lt;champ&gt;(self, obj)</code> — <code>obj</code> = instance complète.</p>
+  </section>
+  <section>
+    <div class="kicker">Code</div>
+    <pre><code class="language-python" data-trim data-noescape>jours_restants = serializers.SerializerMethodField()
+
+def get_jours_restants(self, obj):
+    return (obj.date - timezone.now().date()).days</code></pre>
+  </section>
+</section>
+
+<!-- ============ PARTIE 5 ============ -->
+<section class="section-slide">
+  <div class="part-number">5</div>
+  <h1>Contexte &amp; représentation</h1>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Savoir qui fait la requête</h2>
+    <p>Le serializer doit connaître l'utilisateur connecté pour adapter sa réponse.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>context</code></h2>
+    <ul>
+      <li><code>context={"request": request}</code> — un dictionnaire</li>
+      <li>Auto-injecté par <code>get_serializer()</code> dans les vues génériques</li>
+    </ul>
+  </section>
+  <section>
+    <div class="kicker">❌ Erreur courante</div>
+    <pre><code class="language-python" data-trim data-noescape>UserSerializer(data=request.data, context=request.user)</code></pre>
+  </section>
+  <section>
+    <div class="kicker">✅ Correction</div>
+    <pre><code class="language-python" data-trim data-noescape>UserSerializer(data=request.data, context={"request": request})
+# puis :
+self.context["request"].user</code></pre>
+  </section>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Fuite de données entre profils</h2>
+    <p>Un profil affiche l'email des <strong>autres</strong> utilisateurs — bug de sécurité.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>to_representation()</code></h2>
+    <p>Toujours <code>super().to_representation(instance)</code> d'abord, puis modifier <code>data</code>.</p>
+  </section>
+  <section>
+    <div class="kicker">❌ Erreur courante</div>
+    <pre><code class="language-python" data-trim data-noescape>def to_representation(self, instance):
+    data = self.to_representation(instance)        # RecursionError
+    if self.context["request"].user == instance:    # condition inversée
+        data.pop("email")
+    return data</code></pre>
+  </section>
+  <section>
+    <div class="kicker">✅ Correction</div>
+    <pre><code class="language-python" data-trim data-noescape>def to_representation(self, instance):
+    data = super().to_representation(instance)
+    if self.context["request"].user != instance:
+        data.pop("email")
+    return data</code></pre>
+  </section>
+</section>
+
+<!-- ============ PARTIE 6 ============ -->
+<section class="section-slide">
+  <div class="part-number">6</div>
+  <h1>Relations</h1>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Une commande, plusieurs articles</h2>
+    <p>Créer <code>Order</code> et ses <code>OrderItem</code> en un seul POST.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2>Serializer imbriqué en écriture</h2>
+    <p><strong>Jamais automatique</strong> — il faut override <code>create()</code>.</p>
+  </section>
+  <section>
+    <div class="kicker">❌ Comportement par défaut</div>
+    <div class="card danger"><code>ModelSerializer.create()</code> ne sait pas transformer
+    une liste de dicts en objets liés par clé étrangère.</div>
+  </section>
+  <section>
+    <div class="kicker">✅ Correction</div>
+    <pre><code class="language-python" data-trim data-noescape>def create(self, validated_data):
+    items_data = validated_data.pop("items")
+    order = Order.objects.create(**validated_data)
+    for item in items_data:
+        OrderItem.objects.create(order=order, **item)
+    return order</code></pre>
+  </section>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Un total sur toute la liste</h2>
+    <p>Calculer une somme globale, pas commande par commande.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>many=True</code> → <code>ListSerializer</code></h2>
+    <p>Logique globale : subclasser <code>ListSerializer</code> + <code>Meta.list_serializer_class</code>.</p>
+  </section>
+  <section>
+    <div class="kicker">Code</div>
+    <pre><code class="language-python" data-trim data-noescape>class OrderListSerializer(serializers.ListSerializer):
+    # ListSerializer.data enveloppe TOUJOURS le retour dans un ReturnList,
+    # même si to_representation() renvoie un dict -> il faut surcharger
+    # data lui-même, pas to_representation().
+    @property
+    def data(self):
+        orders = super().data
+        total = sum(o["amount"] for o in orders)
+        return {"total": total, "orders": orders}
+
+class OrderSerializer(serializers.ModelSerializer):
+    class Meta:
+        list_serializer_class = OrderListSerializer</code></pre>
+  </section>
+</section>
+
+<section>
+  <section>
+    <div class="kicker">Problème métier</div>
+    <h2>Un lien plutôt qu'un identifiant brut</h2>
+    <p>Dans une API publique, exposer une URL cliquable vers l'utilisateur.</p>
+  </section>
+  <section>
+    <div class="kicker">Concept DRF</div>
+    <h2><code>HyperlinkedModelSerializer</code></h2>
+    <p>Relations rendues en <strong>URL</strong> vers la ressource — <code>id</code> remplacé par <code>url</code>.</p>
+  </section>
+  <section>
+    <div class="kicker">Code</div>
+    <pre><code class="language-python" data-trim data-noescape>class OrderSerializer(serializers.HyperlinkedModelSerializer):
+    class Meta:
+        model = Order
+        fields = ["url", "user", "amount"]
+        # user -> "http://api/users/12/" au lieu de 12</code></pre>
+  </section>
+</section>
+
+<!-- ============ BILAN ============ -->
+<section class="section-slide">
+  <div class="part-number">✓</div>
+  <h1>Bilan</h1>
+</section>
+
+<section>
+  <h2>La grille à retenir</h2>
+  <table style="width:100%; font-size:0.7em; border-collapse:collapse;">
+    <tr>
+      <th></th><th>Méthode manuelle</th><th>Mécanisme déclaratif</th>
+    </tr>
+    <tr>
+      <td><strong>Champ</strong></td><td><code>validate_&lt;champ&gt;()</code></td><td><code>validators=[...]</code></td>
+    </tr>
+    <tr>
+      <td><strong>Objet</strong></td><td><code>validate()</code></td><td><code>Meta.validators</code></td>
+    </tr>
+  </table>
+  <p style="font-size:0.6em; margin-top:0.8em;">Les deux colonnes s'exécutent toutes les deux, orchestrées par <code>is_valid()</code>.</p>
+</section>
+
+<section>
+  <h2>Deux idées fil rouge</h2>
+  <div class="card"><h4>save() ne construit rien</h4>Il délègue à <code>create()</code>/<code>update()</code> — même logique qui sépare <code>create_user()</code> (hash) de <code>write_only</code> (visibilité).</div>
+  <div class="card" style="margin-top:0.6em;"><h4>Réutilisabilité</h4>Valider dans le serializer (pas la vue) ; écrire des validators custom réutilisables entre serializers.</div>
+</section>
+
+<section>
+  <h2>⚠️ Le piège à surveiller</h2>
+  <div class="card warn">
+    Inventer un nom plausible quand on ne sait pas
+    (<code>ErrorHandler</code>, <code>PasswordField</code>, <code>hidden=True</code>)
+    au lieu de dire <strong>« je ne sais pas »</strong>.
+  </div>
+</section>
+
+<section class="title-slide">
+  <div class="kicker">Feu vert</div>
+  <h1>Prêt pour la suite</h1>
+  <p class="subtitle">Les fondamentaux sont acquis — direction le drill multi-agents</p>
+</section>
+
+</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/highlight/highlight.js"></script>
+<script>
+  Reveal.initialize({
+    hash: true,
+    controls: true,
+    progress: true,
+    center: true,
+    slideNumber: 'c/t',
+    transition: 'slide',
+    plugins: [RevealHighlight]
+  });
+
+  // Un snippet de 3 lignes et un snippet de 13 lignes ne peuvent pas partager
+  // la même taille : à taille fixe, soit le court flotte perdu au milieu de la
+  // page, soit le long déborde. On agrandit donc chaque bloc au maximum de ce
+  // que la slide peut contenir.
+  //
+  // La contrainte qui mord en premier est la LARGEUR, pas le nombre de lignes :
+  // une seule ligne longue suffit à déclencher une barre de défilement
+  // horizontale — sur un vidéoprojecteur, le texte coupé est simplement perdu
+  // pour la salle. On réduit donc tant qu'une ligne dépasse, puis tant que la
+  // slide entière dépasse la hauteur du deck.
+  const MAX_EM = 1.05, MIN_EM = 0.45, STEP = 0.02;
+  const DECK_H = Reveal.getConfig().height;
+
+  function fitCode(section) {
+    if (!section) return;
+    section.querySelectorAll('pre').forEach(pre => {
+      const code = pre.querySelector('code');
+      if (!code) return;
+      let em = MAX_EM;
+      pre.style.fontSize = em + 'em';
+      const tooWide = () => code.scrollWidth > code.clientWidth + 1;
+      const tooTall = () => section.scrollHeight > DECK_H;
+      while (em > MIN_EM && (tooWide() || tooTall())) {
+        em -= STEP;
+        pre.style.fontSize = em.toFixed(2) + 'em';
+      }
+    });
+  }
+
+  // Les slides masquées ont `display:none` : leurs dimensions valent 0 et la
+  // mesure serait fausse. On ajuste donc la slide au moment où elle s'affiche.
+  // Exception : à l'export PDF (?print-pdf) reveal.js rend toutes les slides
+  // simultanément, et aucun `slidechanged` n'est émis — on les ajuste en bloc.
+  const isPrint = /print-pdf/gi.test(window.location.search);
+  Reveal.on('ready', e => {
+    if (isPrint) document.querySelectorAll('.reveal .slides section').forEach(fitCode);
+    else fitCode(e.currentSlide);
+  });
+  Reveal.on('slidechanged', e => fitCode(e.currentSlide));
+  Reveal.on('resize', () => fitCode(Reveal.getCurrentSlide()));
+
+  const root = document.documentElement;
+  const stored = localStorage.getItem('ipssi-theme');
+  if (stored) root.setAttribute('data-theme', stored);
+  document.getElementById('theme-toggle').addEventListener('click', () => {
+    const current = root.getAttribute('data-theme')
+      || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const next = current === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    localStorage.setItem('ipssi-theme', next);
+  });
+</script>
+</body>
+</html>
