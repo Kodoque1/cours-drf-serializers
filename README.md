@@ -13,6 +13,7 @@ slides, document de référence, 6 TP et un projet Django prêt à l'emploi.
 | `tp_django/` | Projet Django barebone support des TP. |
 | `bilan_bloc1_serializers_validations.md` | Synthèse courte (lexique + formulations clés). |
 | `theme-ipssi.css` | Thème reveal.js clair/sombre. |
+| `PROMPT_generation_cours.md` | Prompt réutilisable pour produire — et auditer — le matériel des blocs suivants. |
 
 ## Progression
 
